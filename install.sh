@@ -13,6 +13,7 @@ BRANCH="main"
 ELECTRON_VERSION="45.3.2"
 
 NAME=""; NO_LOGIN=0; NO_MODELS=0; NO_LAUNCH=0
+ORIG_ARGS=("$@")          # kept for the re-exec after downloading the project
 while [ $# -gt 0 ]; do
   case "$1" in
     --name) NAME="${2:-}"; shift 2 ;;
@@ -44,7 +45,7 @@ if [ -z "$ROOT" ] || [ ! -d "$ROOT/core" ]; then
   curl -fsSL "https://github.com/$REPO_SLUG/archive/refs/heads/$BRANCH.tar.gz" | tar -xz --strip-components=1 -C "$DEST" \
     || die "Не удалось скачать проект с GitHub ($REPO_SLUG). Проверьте интернет и ссылку."
   ok "Проект лежит в $DEST"
-  exec bash "$DEST/install.sh" "$@"
+  exec bash "$DEST/install.sh" ${ORIG_ARGS[@]+"${ORIG_ARGS[@]}"}
 fi
 cd "$ROOT"
 
@@ -67,7 +68,7 @@ if ! command -v uv >/dev/null 2>&1; then
   export PATH="$HOME/.local/bin:$PATH"
 fi
 ok "uv: $(uv --version)"
-( cd "$ROOT/core" && uv sync ) || die "Не удалось установить библиотеки Python."
+( cd "$ROOT/core" && uv sync --python 3.12 ) || die "Не удалось установить библиотеки Python."
 PY="$ROOT/core/.venv/bin/python"
 ok "Библиотеки установлены"
 
@@ -123,7 +124,7 @@ fi
 # ---------------------------------------------------------------- models
 if [ "$NO_MODELS" -eq 0 ]; then
   say "Скачиваю модели речи (около 2 ГБ, один раз — это самый долгий шаг)"
-  ( cd "$ROOT/core" && IXZIB_CONFIG="$CONFIG" "$PY" ixzib_core.py --setup ) || die "Не удалось скачать модели речи."
+  ( cd "$ROOT/core" && IXZIB_CONFIG="$CONFIG" "$PY" ixzib_core.py --setup ) || die "Не удалось скачать модели речи (см. сообщения выше). Обычно помогает просто запустить установку ещё раз."
   ok "Модели готовы"
 fi
 
