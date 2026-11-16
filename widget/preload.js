@@ -1,0 +1,2 @@
+const { contextBridge, ipcRenderer } = require('electron');
+contextBridge.exposeInMainWorld('api', { onToggle: cb => ipcRenderer.on('toggle', cb), quit: () => ipcRenderer.send('quit'), closeChat: () => ipcRenderer.send('chat-close'), showMenu: () => ipcRenderer.send('menu'), dragStart: () => ipcRenderer.send('drag-start'), dragMove: (dx, dy) => ipcRenderer.send('drag-move', dx, dy), onHover: cb => ipcRenderer.on('hover', (_e, v) => cb(v)) });

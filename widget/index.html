@@ -1,0 +1,189 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+  html,body{margin:0;background:transparent;overflow:hidden;user-select:none;width:300px}
+  #orb{width:170px;height:170px;margin:0 auto;cursor:pointer}
+  #close{position:fixed;top:6px;left:212px;width:22px;height:22px;border-radius:50%;border:1px solid #ffffff33;background:#0b1020cc;color:#fff;font:12px/20px -apple-system,sans-serif;padding:0;cursor:pointer;opacity:0;transform:scale(.7);transition:opacity .25s,transform .25s,background .15s;-webkit-app-region:no-drag;pointer-events:none}
+  #close.on{opacity:1;transform:scale(1);pointer-events:auto}
+  #close:hover{background:#ff5a5fcc}
+  #label{margin-top:-6px;text-align:center;font:11px -apple-system,sans-serif;color:#cfe8ffcc}
+  #answer{margin:6px 12px;font:12px/1.35 -apple-system,sans-serif;color:#fff;background:#0b1020cc;border-radius:10px;padding:8px 10px;display:none}
+  #perm{display:none;margin:6px 12px;font:12px -apple-system,sans-serif;color:#fff;background:#3a2410dd;border-radius:10px;padding:8px 10px;text-align:center;-webkit-app-region:no-drag}
+  #perm button{margin:6px 4px 0;padding:3px 14px;border:0;border-radius:6px;cursor:pointer;font-size:12px}
+  #yes{background:#3ddc97}#no{background:#ff6b6b}
+</style></head>
+<body>
+<div id="orb"></div>
+<button id="close" title="Выход">✕</button>
+<div id="label"></div>
+<div id="answer"></div>
+<div id="perm"><span id="ptext"></span><div><button id="yes">Да</button><button id="no">Нет</button></div></div>
+<script type="module">
+import * as THREE from './vendor/three.module.js';
+
+// ---------- state config ----------
+// amp: ribbon height, wid: ribbon thickness, spd: flow speed, warm: colour warmth, swirl: slow tilt of the ribbon
+const ST = {
+  idle:      { amp:0.80, wid:0.90, spd:0.50, warm:0.0, swirl:0.12 },
+  listening: { amp:1.05, wid:1.00, spd:0.75, warm:0.0, swirl:0.00 },
+  thinking:  { amp:0.90, wid:1.20, spd:0.60, warm:0.0, swirl:0.35 },
+  working:   { amp:0.95, wid:1.10, spd:0.65, warm:0.6, swirl:0.20 },
+  speaking:  { amp:0.95, wid:1.00, spd:0.65, warm:0.2, swirl:0.00 },
+};
+const DARK = 0.22, HOVER = 0.7;
+let state = 'idle', level = 0, hover = false;
+const label = document.getElementById('label');
+function setLabel(text){ label.textContent = (!text || text.toLowerCase()==='ixzib') ? '' : text; }
+function setState(s, text){ state = ST[s] ? s : 'idle'; if(text!==undefined) setLabel(text); }
+
+// critically damped spring: smooth, no jitter
+class Spring {
+  constructor(x){ this.x = x; this.v = 0; }
+  step(target, w, dt){ const a = w*w*(target-this.x) - 2*w*this.v; this.v += a*dt; this.x += this.v*dt; return this.x; }
+}
+
+// ---------- transparent glass orb with a flowing ribbon of light ----------
+const SIZE = 170;
+const renderer = new THREE.WebGLRenderer({ alpha:true, antialias:true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(SIZE, SIZE);
+renderer.setClearColor(0x000000, 0);
+document.getElementById('orb').appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const cam = new THREE.OrthographicCamera(-1,1,1,-1,0,1);
+
+const mat = new THREE.ShaderMaterial({
+  transparent: true, depthTest: false, depthWrite: false,
+  uniforms: { uT:{value:0}, uAmp:{value:0.8}, uWid:{value:0.9}, uLvl:{value:0}, uK:{value:0.5}, uRot:{value:-0.14}, uWarm:{value:0}, uR:{value:0.93} },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+  fragmentShader: `
+    precision highp float;
+    varying vec2 vUv;
+    uniform float uT,uAmp,uWid,uLvl,uK,uRot,uWarm,uR;
+    const float PI = 3.14159265;
+    float g(float d, float w){ return exp(-(d*d)/(w*w)); }
+    float wrap(float a){ return mod(a + PI, 2.0*PI) - PI; }
+    void main(){
+      vec2 p = (vUv-0.5)*2.0;
+      float R = uR, r = length(p);
+      float mask = 1.0 - smoothstep(R-0.012, R, r);
+      if(mask <= 0.0){ gl_FragColor = vec4(0.0); return; }
+      vec2 n2 = p/R;
+      float rn = length(n2), th = atan(n2.y, n2.x), t = uT;
+
+      // ---- the ribbon (lives in a slowly tilting frame) ----
+      float c = cos(uRot), s = sin(uRot);
+      vec2 q = mat2(c,-s,s,c)*n2;
+      float env = pow(max(1.0-q.x*q.x,0.0), 0.9);                  // pinches towards the sides
+      float amp = uAmp*(0.75+uLvl*0.9)*(1.0+0.10*sin(t*1.7)), wd = uWid*(0.85+uLvl*0.6);
+      vec3 acc = vec3(0.0);
+      float y, w, d;
+
+      y = 0.16*amp*sin(q.x*2.8+t*1.1)*env + 0.08*amp;  w = 0.075*wd*env+0.012;  d = q.y-y;           // blue
+      acc += vec3(0.08,0.60,1.00)*(g(d,w) + 0.35*g(d,w*3.0));
+      y = 0.12*amp*sin(q.x*3.3-t*0.9+1.3)*env + 0.02*amp; w = 0.070*wd*env+0.012; d = q.y-y;          // violet
+      acc += vec3(0.58,0.24,1.00)*(g(d,w) + 0.35*g(d,w*3.0));
+      y = 0.14*amp*sin(q.x*2.5+t*0.8+2.6)*env - 0.07*amp; w = 0.080*wd*env+0.012; d = q.y-y;          // amber -> yellow
+      acc += mix(vec3(1.00,0.48,0.10), vec3(1.00,0.82,0.28), smoothstep(-0.2,0.6,q.x))*(g(d,w) + 0.35*g(d,w*3.0));
+      y = 0.07*amp*sin(q.x*3.0+t*1.4+0.7)*env - 0.01;   w = 0.035*wd*env+0.007; d = q.y-y;            // white core
+      acc += vec3(1.1)*g(d,w);
+
+      acc *= mix(vec3(0.85,0.95,1.25), vec3(1.25,1.00,0.80), smoothstep(-0.8,0.8,q.x));              // left cooler / right warmer
+      acc = mix(acc, acc*vec3(1.2,0.9,0.7), uWarm*0.5);
+      float band = g(q.y, 0.14*wd*amp+0.05);                                                         // coloured fringes at the sides
+      acc += vec3(0.30,0.72,1.20)*smoothstep(0.78,0.98,-q.x)*band*0.8;
+      acc += vec3(1.20,0.55,0.20)*smoothstep(0.78,0.98, q.x)*band*0.8;
+      acc *= uK;
+
+      // ---- glass: fresnel rim, soft crescent reflections ----
+      vec3 glass = vec3(0.85,0.92,1.0)*pow(rn, 10.0)*0.28;
+      glass += mix(vec3(0.40,0.70,1.0), vec3(1.0,0.60,0.80), 0.5+0.5*sin(th+1.0))*pow(rn,14.0)*0.16;
+      glass += vec3(1.0)*(g(rn-0.90, 0.045)*exp(-pow(wrap(th-2.35)/0.55, 2.0))*0.80
+                        + g(rn-0.90, 0.035)*exp(-pow(wrap(th+0.80)/0.45, 2.0))*0.25);
+
+      vec3 col = 1.0 - exp(-(acc + glass)*1.6);                    // soft highlight roll-off
+      float aL = clamp(max(max(col.r,col.g),col.b), 0.0, 1.0);     // opacity follows the light
+      // faint smoky glass volume so the sphere still reads on any background (no solid backdrop)
+      float smoke = 0.07*(0.6 + 0.4*rn);
+      float a = aL + smoke*(1.0 - aL);
+      vec3 rgb = col + vec3(0.02,0.03,0.05)*smoke*(1.0 - aL);      // premultiplied
+      gl_FragColor = vec4(rgb/max(a,0.001), a*mask);
+    }`,
+});
+const quad = new THREE.Mesh(new THREE.PlaneGeometry(2,2), mat);
+quad.frustumCulled = false;
+scene.add(quad);
+
+// ---------- animate ----------
+const U = mat.uniforms;
+const sp = { amp:new Spring(0.8), wid:new Spring(0.9), spd:new Spring(0.5), warm:new Spring(0), swirl:new Spring(0.12), lvl:new Spring(0), bright:new Spring(DARK) };
+let last = performance.now(), t = 0, phase = 0;
+function tick(now){
+  if(document.hidden || now - last < 30){ requestAnimationFrame(tick); return; }   // ~30 fps, idle when hidden
+  const dt = Math.min(0.066,(now-last)/1000); last = now; t += dt;
+  const S = ST[state];
+  const amp = sp.amp.step(S.amp, 3.0, dt), wid = sp.wid.step(S.wid, 3.0, dt);
+  const spd = sp.spd.step(S.spd, 2.5, dt), warm = sp.warm.step(S.warm, 2.0, dt), swirl = sp.swirl.step(S.swirl, 2.0, dt);
+  const bright = sp.bright.step((hover || state!=='idle') ? HOVER : DARK, 3.0, dt);
+  const lvl = Math.max(0, sp.lvl.step(level, 9.0, dt));
+
+  phase += spd*dt;                              // integrate speed -> no jumps when it changes
+  U.uT.value = phase;
+  U.uAmp.value = amp; U.uWid.value = wid; U.uWarm.value = warm; U.uLvl.value = lvl;
+  U.uK.value = 0.55 + 0.45*Math.max(0, Math.min(1, (bright-DARK)/(HOVER-DARK)));   // dim at rest, still clearly alive
+  U.uRot.value = -0.14 + swirl*Math.sin(t*0.55);
+  U.uR.value = 0.93 + Math.sin(t*1.3)*0.006 + lvl*0.012;
+
+  renderer.render(scene, cam);
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+const closeBtn = document.getElementById('close');
+window.api.onHover(v => { hover = v; closeBtn.classList.toggle('on', v); });
+closeBtn.onclick = (e) => { e.stopPropagation(); window.api.quit(); };
+
+// left click = listen, drag = move the widget, right click = menu
+const orbEl = document.getElementById('orb');
+let down = null, dragging = false;
+orbEl.addEventListener('mousedown', e => { if(e.button !== 0) return; down = { x:e.screenX, y:e.screenY }; dragging = false; window.api.dragStart(); });
+window.addEventListener('mousemove', e => {
+  if(!down) return;
+  const dx = e.screenX - down.x, dy = e.screenY - down.y;
+  if(!dragging && Math.hypot(dx,dy) > 4) dragging = true;
+  if(dragging) window.api.dragMove(dx, dy);
+});
+window.addEventListener('mouseup', () => {
+  if(!down) return;
+  const wasDrag = dragging; down = null; dragging = false;
+  if(!wasDrag && ws && ws.readyState === 1) ws.send(JSON.stringify({cmd:'toggle'}));
+});
+orbEl.addEventListener('contextmenu', e => { e.preventDefault(); window.api.showMenu(); });
+
+// ---------- connection to core ----------
+let ws, curPerm = null;
+const answerPerm = ok => { if(curPerm && ws) ws.send(JSON.stringify({cmd:'perm', id:curPerm.id, allow:ok})); };
+document.getElementById('yes').onclick = () => answerPerm(true);
+document.getElementById('no').onclick = () => answerPerm(false);
+
+function connect(){
+  ws = new WebSocket('ws://127.0.0.1:8765');
+  ws.onmessage = e => {
+    const m = JSON.parse(e.data);
+    if(m.state) setState(m.state, m.label);
+    else if(m.label!==undefined) setLabel(m.label);
+    if(m.level!==undefined) level = m.level;
+    if('answer' in m){
+      const a = document.getElementById('answer'); a.textContent = m.answer; a.style.display = m.answer ? 'block' : 'none';
+      clearTimeout(window._at); if(m.answer) window._at = setTimeout(()=>a.style.display='none', 20000);
+    }
+    if('perm' in m){
+      const p = document.getElementById('perm'); curPerm = m.perm; p.style.display = m.perm ? 'block' : 'none';
+      if(m.perm) document.getElementById('ptext').textContent = m.perm.text;
+    }
+  };
+  ws.onclose = () => { setState('idle','offline'); setTimeout(connect, 1500); };
+}
+connect();
+window.api.onToggle(() => ws && ws.readyState===1 && ws.send(JSON.stringify({cmd:'toggle'})));
+</script>
+</body></html>
